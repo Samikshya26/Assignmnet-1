@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hong Kong Temperature Matrix</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: white;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        #status {
+            text-align: center;
+            padding: 10px;
+            margin: 10px auto;
+            max-width: 600px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .control-btn {
+            padding: 8px 20px;
+            margin: 0 5px;
+            font-size: 14px;
+            border: 1px solid #007bff;
+            background: white;
+            color: #007bff;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .control-btn.active {
+            background: #007bff;
+            color: white;
+        }
+        .matrix-container {
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        table {
+            border-collapse: collapse;
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        th {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border: 1px solid #dee2e6;
+            font-weight: bold;
+        }
+        td {
+            border: 1px solid #dee2e6;
+            padding: 8px;
+            text-align: center;
+            position: relative;
+            min-width: 60px;
+            height: 45px;
+        }
+        .month-header {
+            background-color: #e9ecef;
+            font-weight: bold;
+            min-width: 80px;
+        }
+        .temp-value {
+            position: relative;
+            z-index: 2;
+            font-weight: bold;
+            text-shadow: 0 0 2px rgba(255,255,255,0.5);
+        }
+        .mini-chart {
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            width: 45px;
+            height: 20px;
+            opacity: 0.7;
+            z-index: 1;
+        }
+        .legend {
+            max-width: 400px;
+            margin: 30px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .legend-title {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .legend-gradient {
+            height: 20px;
+            background: linear-gradient(to right, #0000ff, #00ffff, #ffff00, #ff0000);
+            border-radius: 4px;
+        }
+        .legend-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 12px;
+        }
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌡️ Monthly Temperature of Hong Kong</h1>
+    <div class="subtitle" id="subtitle">Last 10 Years (2008-2017)</div>
+    
+    <div id="status">Loading data...</div>
+    
+    <div class="controls">
+        <button id="btn-max" class="control-btn active">Maximum Temperature</button>
+        <button id="btn-min" class="control-btn">Minimum Temperature</button>
+    </div>
+    
+    <div class="matrix-container" id="matrix"></div>
+    
+    <div class="legend">
+        <div class="legend-title">Temperature Color Scale</div>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels">
+            <span>10°C</span>
+            <span>20°C</span>
+            <span>30°C</span>
+            <span>35°C+</span>
+        </div>
+    </div>
+    
+    <div id="tooltip" class="tooltip" style="display: none;"></div>
+    
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <script>
+        // Global variables
+        let allData = [];
+        let currentView = 'max';
+        
+        // Load and process data
+        d3.csv("temperature_daily.csv").then(function(rawData) {
+            console.log("First row:", rawData[0]);
+            
+            // Process data with correct column names
+            allData = rawData.map(d => ({
+                date: new Date(d.date),
+                maxTemp: parseFloat(d.max_temperature),
+                minTemp: parseFloat(d.min_temperature)
+            })).filter(d => !isNaN(d.maxTemp) && !isNaN(d.minTemp));
+            
+            // Get all years
+            const allYears = [...new Set(allData.map(d => d.date.getFullYear()))].sort();
+            const minYear = allYears[0];
+            const maxYear = allYears[allYears.length - 1];
+            
+            console.log("All years in dataset:", allYears);
+            console.log(`Data from ${minYear} to ${maxYear}`);
+            
+            // Calculate last 10 years based on the maximum year in data
+            const cutoffYear = maxYear - 9; // Show 10 years including maxYear
+            const last10YearsData = allData.filter(d => d.date.getFullYear() >= cutoffYear);
+            
+            const displayedYears = [...new Set(last10YearsData.map(d => d.date.getFullYear()))].sort();
+            
+            document.getElementById('subtitle').innerHTML = 
+                `Last 10 Years (${displayedYears[0]} - ${displayedYears[displayedYears.length-1]})`;
+            
+            document.getElementById('status').innerHTML = 
+                `✅ Loaded ${last10YearsData.length} days of temperature data<br>
+                 📅 Showing years: ${displayedYears.join(', ')}`;
+            
+            // Draw the matrix with last 10 years
+            drawMatrix(last10YearsData);
+            
+        }).catch(function(error) {
+            document.getElementById('status').innerHTML = '❌ Error loading data: ' + error;
+            console.error(error);
+        });
+        
+        function drawMatrix(data) {
+            const months = [0,1,2,3,4,5,6,7,8,9,10,11];
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            
+            // Group data by year and month
+            const groupedData = {};
+            data.forEach(d => {
+                const year = d.date.getFullYear();
+                const month = d.date.getMonth();
+                const key = `${year}-${month}`;
+                
+                if (!groupedData[key]) {
+                    groupedData[key] = {
+                        year: year,
+                        month: month,
+                        monthName: monthNames[month],
+                        dailyData: [],
+                        maxTemp: -Infinity,
+                        minTemp: Infinity
+                    };
+                }
+                
+                groupedData[key].dailyData.push(d);
+                groupedData[key].maxTemp = Math.max(groupedData[key].maxTemp, d.maxTemp);
+                groupedData[key].minTemp = Math.min(groupedData[key].minTemp, d.minTemp);
+            });
+            
+            // Get years from the data (should be last 10 years)
+            const years = [...new Set(data.map(d => d.date.getFullYear()))].sort();
+            
+            // Create table HTML
+            let html = '<table>';
+            
+            // Header row with years
+            html += '<thead><tr><th>Month</th>';
+            years.forEach(year => {
+                html += `<th>${year}</th>`;
+            });
+            html += '</tr></thead>';
+            
+            // Body with months
+            html += '<tbody>';
+            months.forEach(month => {
+                html += `<tr><th class="month-header">${monthNames[month]}</th>`;
+                
+                years.forEach(year => {
+                    const key = `${year}-${month}`;
+                    const cellData = groupedData[key];
+                    
+                    if (cellData && cellData.dailyData.length > 0) {
+                        const tempValue = currentView === 'max' ? cellData.maxTemp : cellData.minTemp;
+                        const bgColor = getColorForTemperature(tempValue);
+                        const textColor = tempValue > 28 ? 'white' : 'black';
+                        
+                        html += `<td style="background-color: ${bgColor}; color: ${textColor};" 
+                                   onmouseover="showTooltip(event, '${monthNames[month]} ${year}', ${cellData.maxTemp}, ${cellData.minTemp})"
+                                   onmouseout="hideTooltip()">`;
+                        
+                        // Temperature value
+                        html += `<span class="temp-value">${tempValue.toFixed(1)}°</span>`;
+                        
+                        // Mini line chart
+                        if (cellData.dailyData.length > 1) {
+                            html += drawMiniChart(cellData.dailyData);
+                        }
+                        
+                        html += '</td>';
+                    } else {
+                        html += '<td style="background-color: #f0f0f0;">—</td>';
+                    }
+                });
+                
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            document.getElementById('matrix').innerHTML = html;
+        }
+        
+        function drawMiniChart(dailyData) {
+            // Sort by date
+            const sortedData = [...dailyData].sort((a, b) => a.date - b.date);
+            
+            // Find min and max for scaling
+            const allTemps = sortedData.flatMap(d => [d.maxTemp, d.minTemp]);
+            const minTemp = Math.min(...allTemps);
+            const maxTemp = Math.max(...allTemps);
+            const range = maxTemp - minTemp || 1;
+            
+            // Chart dimensions
+            const width = 45;
+            const height = 18;
+            
+            let svg = `<svg class="mini-chart" viewBox="0 0 ${width} ${height}">`;
+            
+            // Draw max temperature line (red)
+            let maxPoints = [];
+            sortedData.forEach((d, i) => {
+                const x = (i / (sortedData.length - 1)) * width;
+                const y = height - ((d.maxTemp - minTemp) / range) * (height - 2);
+                maxPoints.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+            });
+            
+            if (maxPoints.length > 1) {
+                svg += `<polyline points="${maxPoints.join(' ')}" 
+                        stroke="#ff4444" stroke-width="1.2" fill="none" 
+                        stroke-linecap="round" stroke-linejoin="round"/>`;
+            }
+            
+            // Draw min temperature line (blue)
+            let minPoints = [];
+            sortedData.forEach((d, i) => {
+                const x = (i / (sortedData.length - 1)) * width;
+                const y = height - ((d.minTemp - minTemp) / range) * (height - 2);
+                minPoints.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+            });
+            
+            if (minPoints.length > 1) {
+                svg += `<polyline points="${minPoints.join(' ')}" 
+                        stroke="#4444ff" stroke-width="1.2" fill="none" 
+                        stroke-linecap="round" stroke-linejoin="round"/>`;
+            }
+            
+            svg += '</svg>';
+            return svg;
+        }
+        
+        function getColorForTemperature(temp) {
+            // Color scale from blue (10°C) to red (35°C)
+            const minTemp = 10;
+            const maxTemp = 35;
+            const t = Math.max(0, Math.min(1, (temp - minTemp) / (maxTemp - minTemp)));
+            
+            // RGB interpolation for better gradient
+            let r, g, b;
+            if (t < 0.25) {
+                // Blue to Cyan
+                r = 0;
+                g = Math.round(255 * (t / 0.25));
+                b = 255;
+            } else if (t < 0.5) {
+                // Cyan to Green
+                r = 0;
+                g = 255;
+                b = Math.round(255 * (1 - (t - 0.25) / 0.25));
+            } else if (t < 0.75) {
+                // Green to Yellow
+                r = Math.round(255 * ((t - 0.5) / 0.25));
+                g = 255;
+                b = 0;
+            } else {
+                // Yellow to Red
+                r = 255;
+                g = Math.round(255 * (1 - (t - 0.75) / 0.25));
+                b = 0;
+            }
+            
+            return `rgb(${r}, ${g}, ${b})`;
+        }
+        
+        // Tooltip functions
+        window.showTooltip = function(event, label, maxTemp, minTemp) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = `<b>${label}</b><br>Max: ${maxTemp.toFixed(1)}°C<br>Min: ${minTemp.toFixed(1)}°C`;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY - 40) + 'px';
+        };
+        
+        window.hideTooltip = function() {
+            document.getElementById('tooltip').style.display = 'none';
+        };
+        
+        // Button controls
+        document.getElementById('btn-max').addEventListener('click', function() {
+            currentView = 'max';
+            document.getElementById('btn-max').classList.add('active');
+            document.getElementById('btn-min').classList.remove('active');
+            
+            // Get max year from data
+            const maxYear = Math.max(...allData.map(d => d.date.getFullYear()));
+            const cutoffYear = maxYear - 9;
+            const last10YearsData = allData.filter(d => d.date.getFullYear() >= cutoffYear);
+            drawMatrix(last10YearsData);
+        });
+        
+        document.getElementById('btn-min').addEventListener('click', function() {
+            currentView = 'min';
+            document.getElementById('btn-max').classList.remove('active');
+            document.getElementById('btn-min').classList.add('active');
+            
+            // Get max year from data
+            const maxYear = Math.max(...allData.map(d => d.date.getFullYear()));
+            const cutoffYear = maxYear - 9;
+            const last10YearsData = allData.filter(d => d.date.getFullYear() >= cutoffYear);
+            drawMatrix(last10YearsData);
+        });
+    </script>
+</body>
+</html>
